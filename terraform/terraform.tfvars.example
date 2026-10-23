@@ -1,0 +1,11 @@
+project_id = "assessment-512510"
+region     = "europe-west2"
+
+# For the Python deployment, set these values after building the image and
+# creating a Secret Manager secret/version outside Terraform.
+# container_image        = "europe-west2-docker.pkg.dev/your-project/file-service/file-service:v1"
+# container_port         = 8080
+# allow_unauthenticated  = false
+# api_token_secret_name  = "file-api-token"
+# api_token_secret_version = "1"
+

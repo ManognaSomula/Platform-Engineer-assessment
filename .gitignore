@@ -1,0 +1,21 @@
+# Terraform state, local variables and provider cache
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+terraform.tfvars.json
+crash.log
+
+# Local Google Cloud CLI download and installation
+google-cloud-sdk/
+google-cloud-cli-*.tar.gz
+
+# Generated submission archive; the source directory is the canonical copy
+platform-file-service.zip
+
+# Python environments and generated files
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+*.py[cod]

@@ -1,0 +1,1 @@
+"""Customer file retrieval service."""
