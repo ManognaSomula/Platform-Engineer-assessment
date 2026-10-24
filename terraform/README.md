@@ -173,6 +173,33 @@ curl -i \
 - Bucket deletion is protected by `force_destroy=false`; empty it deliberately before destroying the stack.
 - Do not commit Terraform state, credentials, or local `terraform.tfvars`.
 
+## Core principles demonstrated
+
+### Testability
+
+Validate the configuration before applying it:
+
+```sh
+terraform fmt -check
+terraform init -backend=false
+terraform validate
+terraform plan -var-file="terraform.tfvars.example"
+```
+
+`fmt` checks formatting, `validate` checks the Terraform configuration and provider schema, and `plan` previews the infrastructure changes for review. These checks do not prove that the deployed service meets its throughput, latency, or availability objectives. Those require representative load and failure testing.
+
+### Simplicity
+
+The module separates core resources (`main.tf`), optional edge resources (`load_balancer.tf`), input values (`variables.tf`), and outputs (`outputs.tf`). Load balancer resources are disabled by default so the basic Cloud Run and Storage deployment stays small.
+
+### Security
+
+The bucket enforces public access prevention and uniform bucket-level access. Cloud Run uses a dedicated runtime service account, with object-viewer access limited to the file bucket; its API token is referenced from Secret Manager instead of being written as a Terraform value. The Nginx demo can be public, but the Python deployment should set `allow_unauthenticated=false`. When the optional load balancer is enabled, Terraform restricts Cloud Run ingress to the load balancer and attaches the configured Cloud Armor WAF policy. The current application token is still an exercise credential, and the load balancer is optional rather than deployed by default.
+
+### Observability
+
+Cloud Run provides platform logs and metrics. The Python application writes structured request logs, and the optional load balancer backend enables request logging. This Terraform does not yet create custom Cloud Monitoring dashboards, SLO alert policies, or application tracing. Add those after choosing the service-level indicators and alert thresholds; do not treat the current scaling settings as evidence that an SLO is met.
+
 Step: 1
 After Deploying Terraform 
 
