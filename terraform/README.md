@@ -60,12 +60,110 @@ The placeholder uses port 80, one warm instance, a 100-instance cap, and concurr
      -var='container_port=8080' \
      -var='allow_unauthenticated=false' \
      -var='api_token_secret_name=file-api-token' \
-     -var='api_token_secret_version=1'
+      -var='api_token_secret_version=1' \
+      -var='api_token_customer_id=demo-customer'
    ```
 
-The runtime service account receives `roles/secretmanager.secretAccessor` on the named secret and `roles/storage.objectViewer` on the file bucket. Cloud Run injects the secret as `API_TOKEN`. Since public invocation is disabled, callers also need a Cloud Run IAM identity token in addition to the application API key. A production customer endpoint should use a load balancer, restrict Cloud Run ingress to that load balancer, and replace the shared exercise key with customer-scoped OIDC/JWT authorization.
+The runtime service account receives `roles/secretmanager.secretAccessor` on the named secret and `roles/storage.objectViewer` on the file bucket. Cloud Run injects the secret as `API_TOKEN` and sets `API_TOKEN_CUSTOMER_ID`. The exercise token is scoped to that one customer ID; requests naming another customer receive HTTP 403 before the service contacts Cloud Storage. Since public invocation is disabled, callers also need a Cloud Run IAM identity token in addition to the application API key. A production customer endpoint should use a load balancer, restrict Cloud Run ingress to that load balancer, and replace the static exercise token with validated customer-scoped OIDC/JWT authorization.
 
-Upload an object to `customers/{customer_id}/{file_id}` in the bucket output by Terraform. Then call the service URL with `X-API-Key` and a valid Cloud Run IAM identity token.
+## Optional global HTTPS load balancer and Cloud Armor demo
+
+Terraform can also create a global external Application Load Balancer in front of Cloud Run, attach a Google-managed HTTPS certificate, redirect HTTP to HTTPS, and attach a Cloud Armor policy with SQL injection and XSS WAF rules. Load balancer request logging is enabled, including Cloud Armor decision details. The WAF rules are enforced at sensitivity 1; review the load balancer logs for false positives before increasing sensitivity or using this unchanged in production.
+
+You need a domain name you control and permission to update its DNS. Choose a hostname such as `files.example.com`; replace it below with your real hostname. The domain is required for Google's managed certificate. Apply the same Python image configuration as above, and add `enable_external_https_lb=true` and `lb_domain`:
+
+```sh
+cd ~/Documents/Platform-Engineer-assessment/terraform
+PROJECT_ID="assessment-512510"
+DOMAIN="files.YOUR-DOMAIN"
+IMAGE="europe-west2-docker.pkg.dev/${PROJECT_ID}/file-service/file-service:v2"
+
+terraform plan \
+  -var-file="terraform.tfvars.example" \
+  -var="container_image=${IMAGE}" \
+  -var='container_port=8080' \
+  -var='allow_unauthenticated=false' \
+  -var='api_token_secret_name=file-api-token' \
+  -var='api_token_secret_version=1' \
+  -var='api_token_customer_id=demo-customer' \
+  -var='enable_external_https_lb=true' \
+  -var="lb_domain=${DOMAIN}"
+```
+
+Review the plan: it should update Cloud Run ingress to `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER` and create the load balancer, Cloud Armor policy, and certificate. When it looks right, rerun that command with `terraform apply` instead of `terraform plan`. The `run.app` URL will no longer accept external traffic directly; the Cloud Run invoker IAM binding is granted so the serverless NEG can reach the service, while restricted ingress forces external requests through the load balancer. The Python API still requires its `X-API-Key` and customer check.
+
+After apply, get the reserved address:
+
+```sh
+terraform output -raw load_balancer_ip
+```
+
+At your DNS provider, create an **A record** for the exact `DOMAIN` hostname pointing to that IPv4 address. Wait for DNS to resolve and for the managed certificate to become active (this can take some time). Then test through `https://${DOMAIN}`. Cloud Armor WAF blocks requests matching its configured SQLi/XSS rules; the default policy allows other traffic through to application authentication. This is a demo WAF policy, not a substitute for tenant authorization or rate limiting.
+
+The global forwarding rules, reserved address, and Cloud Armor can incur charges even at low traffic. Check current GCP pricing before leaving this demo deployed. Destroying Terraform resources will remove the load balancer and IP; do that only when you're finished with the demo.
+
+### Temporary HTTP-only demo when you do not own a domain
+
+You can still demonstrate the external load balancer and attached Cloud Armor policy without a hostname by enabling HTTP-only mode. This does **not** provide TLS: the `X-API-Key` and response travel unencrypted over the public internet. Use only the disposable exercise token and test file, never real customer data or production credentials.
+
+```sh
+cd ~/Documents/Platform-Engineer-assessment/terraform
+terraform plan \
+  -var-file="terraform.tfvars.example" \
+  -var='container_image=europe-west2-docker.pkg.dev/assessment-512510/file-service/file-service:v2' \
+  -var='container_port=8080' \
+  -var='allow_unauthenticated=false' \
+  -var='api_token_secret_name=file-api-token' \
+  -var='api_token_secret_version=1' \
+  -var='api_token_customer_id=demo-customer' \
+  -var='enable_external_http_lb=true'
+```
+
+Review the plan, then rerun it with `terraform apply`. This restricts Cloud Run ingress to the load balancer and creates a static IP, serverless NEG, external HTTP load balancer, and Cloud Armor WAF policy. The load balancer needs public invocation permission to reach Cloud Run through the serverless NEG; restricted ingress prevents direct internet access to the `run.app` URL, and the Python service still checks the API key and configured customer ID.
+
+Get the endpoint and test with the demo token:
+
+```sh
+terraform output -raw load_balancer_url
+curl -i \
+  -H 'X-API-Key: local-demo-token' \
+  "$(terraform output -raw load_balancer_url)/v1/customers/demo-customer/files/welcome.txt"
+```
+
+This proves the request path through the HTTP load balancer and Cloud Armor, but does not demonstrate managed HTTPS or establish the throughput and latency SLOs. Destroy the temporary LB after the demo if you do not need it; the load balancer and Cloud Armor incur charges.
+
+Upload an object to `customers/{customer_id}/{file_id}` in the bucket output by Terraform. Without the optional load balancer, call the Cloud Run service URL with both `X-API-Key` and a Cloud Run IAM identity token. With the HTTPS load balancer enabled, call `https://${DOMAIN}` with `X-API-Key`; with HTTP-only mode, use the `load_balancer_url` output and the demo token only.
+
+### Redeploy the customer-scoped authorization improvement
+
+The updated Python code binds the exercise token to `demo-customer`. Build and push it with a new image tag, then apply Terraform to create a Cloud Run revision with that image and the matching customer setting:
+
+```sh
+cd ~/Documents/Platform-Engineer-assessment
+PROJECT_ID="assessment-512510"
+REGION="europe-west2"
+IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/file-service/file-service:v2"
+docker build -t "${IMAGE}" ./platform-file-service
+docker push "${IMAGE}"
+
+cd terraform
+terraform apply \
+  -var-file="terraform.tfvars.example" \
+  -var="container_image=${IMAGE}" \
+  -var='container_port=8080' \
+  -var='allow_unauthenticated=false' \
+  -var='api_token_secret_name=file-api-token' \
+  -var='api_token_secret_version=1' \
+  -var='api_token_customer_id=demo-customer'
+```
+
+With the Cloud Run proxy running, the existing `demo-customer` request should continue to retrieve the file. A request for another customer using the same API key should return HTTP 403. This demonstrates a single-customer boundary for the exercise; production should derive authorization from a verified customer identity token.
+
+```sh
+curl -i \
+  -H 'X-API-Key: local-demo-token' \
+  http://localhost:8081/v1/customers/another-customer/files/welcome.txt
+```
 
 ## Security and operations notes
 
@@ -83,6 +181,9 @@ artifact_registry_repository = "europe-west2-docker.pkg.dev/assessment-512510/fi
 runtime_service_account = "file-service-runtime@assessment-512510.iam.gserviceaccount.com"
 service_url = "https://customer-file-service-y3kolzbnlq-nw.a.run.app"
 storage_bucket = "assessment-512510-customer-files"
+
+In the browser paste the service url 
+Their is welcome to nginx page 
 
 Step: 2
 Run these from your repository root. cd /Users/manognasomula/Documents/Platform-Engineer-assessment
@@ -165,3 +266,7 @@ X-Cloud-Trace-Context: 996df3eac381a27dcb98882e94615d30;o=1
 X-Content-Type-Options: nosniff
 
 Hello from GCS
+
+The customer-scoping change is now deployed and verified:
+- demo-customer received HTTP 200 and the file contents.
+- another-customer, using the same API key, received HTTP 403 Forbidden.

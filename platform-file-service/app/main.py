@@ -103,6 +103,11 @@ def retrieve_file(customer_id: str, file_id: str):
     if not CUSTOMER_ID_PATTERN.fullmatch(customer_id) or not FILE_ID_PATTERN.fullmatch(file_id):
         raise HTTPException(status_code=400, detail="Invalid customer or file identifier")
 
+    # The exercise token is scoped to one configured customer so possessing it
+    # cannot be used to enumerate another customer's object path.
+    if customer_id != settings.api_token_customer_id:
+        raise HTTPException(status_code=403, detail="Not authorized for this customer")
+
     if not settings.bucket:
         fixture = LOCAL_FIXTURE.get((customer_id, file_id))
         if fixture is None:

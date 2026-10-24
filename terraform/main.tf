@@ -1,5 +1,6 @@
 locals {
-  bucket_name = var.bucket_name != "" ? var.bucket_name : "${var.project_id}-customer-files"
+  bucket_name        = var.bucket_name != "" ? var.bucket_name : "${var.project_id}-customer-files"
+  enable_external_lb = var.enable_external_http_lb || var.enable_external_https_lb
   labels = {
     application = "customer-file-service"
     managed_by  = "terraform"
@@ -10,6 +11,7 @@ resource "google_project_service" "required" {
   for_each = toset([
     "artifactregistry.googleapis.com",
     "cloudresourcemanager.googleapis.com",
+    "compute.googleapis.com",
     "iam.googleapis.com",
     "run.googleapis.com",
     "secretmanager.googleapis.com",
@@ -76,7 +78,7 @@ resource "google_secret_manager_secret_iam_member" "api_token_accessor" {
 resource "google_cloud_run_v2_service" "api" {
   name                = "customer-file-service"
   location            = var.region
-  ingress             = "INGRESS_TRAFFIC_ALL"
+  ingress             = local.enable_external_lb ? "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" : "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
   labels              = local.labels
 
@@ -111,6 +113,11 @@ resource "google_cloud_run_v2_service" "api" {
         value = google_storage_bucket.files.name
       }
 
+      env {
+        name  = "API_TOKEN_CUSTOMER_ID"
+        value = var.api_token_customer_id
+      }
+
       dynamic "env" {
         for_each = var.api_token_secret_name == "" ? [] : [true]
         content {
@@ -137,7 +144,10 @@ resource "google_cloud_run_v2_service" "api" {
 # This is intended only for the temporary Nginx placeholder. Set false when
 # deploying the protected Python service.
 resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
-  count    = var.allow_unauthenticated ? 1 : 0
+  # Serverless NEG requests do not carry a caller's Cloud Run identity token.
+  # When the LB is enabled, ingress is restricted to the LB, while the app's
+  # own customer authorization remains responsible for allowing requests.
+  count    = (var.allow_unauthenticated || local.enable_external_lb) ? 1 : 0
   name     = google_cloud_run_v2_service.api.name
   location = google_cloud_run_v2_service.api.location
   role     = "roles/run.invoker"

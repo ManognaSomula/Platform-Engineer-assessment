@@ -10,7 +10,7 @@ Assessment project for a customer file retrieval microservice. The target archit
 
 Cloud Run is the stateless service tier. Its dedicated service account can read files from the private bucket. Cloud Logging and Cloud Monitoring capture operational signals. Memorystore and Pub/Sub are optional additions for authorized hot-file caching and asynchronous work such as audit processing.
 
-The target design and trade-offs are in [docs/architecture.md](docs/architecture.md). Terraform provisions a smaller, directly runnable Cloud Run and private bucket foundation. The Nginx placeholder is public for the demo; set `allow_unauthenticated=false` for the Python deployment. In production, put the service behind the HTTPS load balancer, restrict ingress to it, and use customer-scoped OIDC/JWT authorization.
+The target design and trade-offs are in [docs/architecture.md](docs/architecture.md). Terraform provisions Cloud Run and a private bucket, with optional global load balancer and Cloud Armor configurations. Managed HTTPS requires a domain you control and a DNS A record; HTTP-only mode is available for a temporary demo without a domain. The Nginx placeholder is public for the initial demo; for Python, the app checks its exercise API key and customer ID. With either load balancer mode enabled, Cloud Run ingress is restricted to the load balancer.
 
 ```mermaid
 flowchart LR
@@ -22,6 +22,12 @@ flowchart LR
   Run -. optional async audit .-> Bus[Pub/Sub]
   Run --> Ops[Cloud Logging and Monitoring]
 ```
+
+#### Detailed target architecture
+
+![Target architecture diagram](docs/target-architecture.jpeg)
+
+This is the proposed end-state design. The OIDC/JWT validation, GitHub Actions Workload Identity Federation, optional regional failover, and dedicated metadata/ownership lookup are design extensions; they are not all provisioned by the current Terraform or implemented in the sample API. The optional load balancer and Cloud Armor components can be deployed by following [the Terraform guide](terraform/README.md).
 
 ### Provision the Nginx placeholder
 
@@ -43,17 +49,17 @@ The public invoker is only for the temporary Nginx placeholder. Disable it for t
 
 ### Build and deploy the Python service
 
-The API endpoint is `GET /v1/customers/{customer_id}/files/{file_id}`. It validates path identifiers, checks the `X-API-Key` exercise token, reads from Cloud Storage when `GCS_BUCKET` is configured, and serves a small in-memory fixture locally. Cloud objects above 10 MiB are rejected before download, and storage failures return a generic backend error.
+The API endpoint is `GET /v1/customers/{customer_id}/files/{file_id}`. It validates path identifiers, checks the `X-API-Key` exercise token, limits that token to the configured `API_TOKEN_CUSTOMER_ID` (default `demo-customer`), reads from Cloud Storage when `GCS_BUCKET` is configured, and serves a small in-memory fixture locally. Cloud objects above 10 MiB are rejected before download, and storage failures return a generic backend error.
 
 Local run and test commands are in [platform-file-service/README.md](platform-file-service/README.md). The application source and tests are included in the repository.
 
-**Security caveat:** the API key is an exercise stub; it does not authorize a caller for a particular customer. For production, validate a customer identity token, check issuer, audience, expiry, and scope, and derive tenant access from a signed claim. Keep Cloud Run invocation authenticated and restrict service ingress to the load balancer.
+**Security caveat:** the static exercise token is scoped to one configured customer, but is not a production identity system. For production, validate a customer identity token, check issuer, audience, expiry, and scope, and derive tenant access from a signed claim. Keep Cloud Run invocation authenticated and restrict service ingress to the load balancer.
 
 ### Scaling and SLO validation
 
 Validate 6,000 requests/second and the 300 ms target with representative file sizes, bursts, steady traffic, concurrency, Cloud Storage latency, regional placement, and quota. Measure success rate and the fraction of responses under 300 ms directly; track p95/p99 latency, saturation, and backend errors. Test dependency and regional failures before making an availability claim.
 
-The Terraform scaling values are starting points, not proof of capacity. The service currently buffers files in memory up to 10 MiB; streaming or short-lived authorized download URLs are follow-up work for larger files. The next production steps include customer-scoped OIDC/JWT auth, the global load balancer and Cloud Armor, SLO dashboards/alerts, and multi-region recovery testing.
+The Terraform scaling values are starting points, not proof of capacity. The service currently buffers files in memory up to 10 MiB; streaming or short-lived authorized download URLs are follow-up work for larger files. Further production work includes replacing the exercise token with customer-scoped OIDC/JWT auth, load testing, SLO dashboards/alerts, and multi-region recovery testing.
 
 ## Project files
 

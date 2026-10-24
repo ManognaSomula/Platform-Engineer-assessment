@@ -7,6 +7,7 @@ class Settings:
     api_token: str
     bucket: str
     log_level: str
+    api_token_customer_id: str = "demo-customer"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -14,6 +15,7 @@ class Settings:
             api_token=os.getenv("API_TOKEN", ""),
             bucket=os.getenv("GCS_BUCKET", ""),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+            api_token_customer_id=os.getenv("API_TOKEN_CUSTOMER_ID", "demo-customer"),
         )
 
 

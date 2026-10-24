@@ -2,13 +2,13 @@
 
 FastAPI service exposing `GET /v1/customers/{customer_id}/files/{file_id}`.
 
-- Requires an `X-API-Key` header and validates customer/file path components.
+- Requires an `X-API-Key` header, validates customer/file path components, and scopes the exercise token to one configured customer ID.
 - Reads `customers/{customer_id}/{file_id}` from Cloud Storage when `GCS_BUCKET` is configured.
 - Uses `demo-customer/welcome.txt` as a local in-memory fixture when no bucket is configured.
 - Rejects files over 10 MiB and returns a generic 502 response for backend failures.
 - Emits structured request logs without logging tokens or file contents.
 
-The API key is a shared exercise stub and does not provide customer-level authorization. Replace it with customer-scoped OIDC/JWT validation before production use.
+The exercise token is scoped to one customer ID using `API_TOKEN_CUSTOMER_ID` (defaults to `demo-customer`). This demonstrates a tenant authorization check, but it is still a shared static token rather than a scalable customer identity system. Replace it with validated customer-scoped OIDC/JWT claims before production use.
 
 ## Local run
 
@@ -20,6 +20,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 export API_TOKEN=local-demo-token
+export API_TOKEN_CUSTOMER_ID=demo-customer
 uvicorn app.main:app --reload --port 8080
 ```
 
@@ -44,4 +45,4 @@ zip -r platform-file-service.zip platform-file-service \
 
 ## Container
 
-The Dockerfile runs as a non-root user on port 8080. Terraform injects `API_TOKEN` from Secret Manager and sets `GCS_BUCKET`; the token payload is not stored in Terraform state.
+The Dockerfile runs as a non-root user on port 8080. Terraform injects `API_TOKEN` from Secret Manager, sets `GCS_BUCKET`, and configures `API_TOKEN_CUSTOMER_ID`; the token payload is not stored in Terraform state.

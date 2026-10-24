@@ -62,3 +62,32 @@ variable "api_token_secret_version" {
   type        = string
   default     = "latest"
 }
+
+variable "api_token_customer_id" {
+  description = "Customer ID this exercise API token is authorized to access."
+  type        = string
+  default     = "demo-customer"
+}
+
+variable "enable_external_https_lb" {
+  description = "Create a global external HTTPS load balancer with Cloud Armor in front of Cloud Run. Requires a domain you control and DNS update access."
+  type        = bool
+  default     = false
+}
+
+variable "enable_external_http_lb" {
+  description = "Create an HTTP-only external load balancer with Cloud Armor for a temporary demo. HTTP traffic is unencrypted; use only with test credentials and data."
+  type        = bool
+  default     = false
+}
+
+variable "lb_domain" {
+  description = "Fully qualified domain name for the managed HTTPS certificate, for example files.example.com."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = length(var.lb_domain) == 0 || can(regex("^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", var.lb_domain))
+    error_message = "lb_domain must be a fully qualified domain name such as files.example.com."
+  }
+}
